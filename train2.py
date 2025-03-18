@@ -1,3 +1,12 @@
+# Train/Fine-Tune SAM 2 on the LabPics 1 dataset
+
+# This script use a single image batch, if you want to train with multi image per batch check this script:
+# https://github.com/sagieppel/fine-tune-train_segment_anything_2_in_60_lines_of_code/blob/main/TRAIN_multi_image_batch.py
+
+# Toturial: https://medium.com/@sagieppel/train-fine-tune-segment-anything-2-sam-2-in-60-lines-of-code-928dd29a63b3
+# Main repo: https://github.com/facebookresearch/segment-anything-2
+# Labpics Dataset can be downloaded from: https://zenodo.org/records/3697452/files/LabPicsV1.zip?download=1
+# Pretrained models for sam2 Can be downloaded from: https://github.com/facebookresearch/segment-anything-2?tab=readme-ov-file#download-checkpoints
 import hydra
 import numpy as np
 import torch
@@ -19,60 +28,51 @@ model_cfg = "../sam2_configs/sam2_hiera_t.yaml"
 sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda")
 predictor = SAM2ImagePredictor(sam2_model)
 
-max_res = 1024
-
 predictor.model.sam_mask_decoder.train(True) # enable training of mask decoder
 predictor.model.sam_prompt_encoder.train(True) # enable training of prompt encoder
 
-optimizer = torch.optim.AdamW(params=predictor.model.parameters(), lr=1e-5, weight_decay=4e-5)
+optimizer = torch.optim.AdamW(params=predictor.model.parameters(),lr=1e-5,weight_decay=4e-5)
 scaler = torch.cuda.amp.GradScaler() # mixed precision
 
+data_dir=r"LabPicsV1/" # Path to dataset (LabPics 1)
+data=[] # list of files in dataset
+for ff, name in enumerate(os.listdir(data_dir+"Simple/Train/Image/")):  # go over all folder annotation
+    data.append({"image":data_dir+"Simple/Train/Image/"+name,"annotation":data_dir+"Simple/Train/Instance/"+name[:-4]+".png"})
 
-# Reading the data paths
-data_dir = "/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/"
-# data_dir = "/home/ckapelonis/Desktop/thesis/thesis-code/"
-data = []
-for name in os.listdir(data_dir + "output_images_original/"):
-    data.append(
-        {
-        "image": data_dir + "output_images_original/" + name,
-        "annotation": data_dir + "output_images_mask/" + name[:-4] + ".png"
-        }
-    )
 
-def read_batch(data):
-    ent = data[np.random.randint(len(data))]
-    img = cv2.imread(ent["image"])[..., ::-1]  
-    ann_map = cv2.imread(ent["annotation"], cv2.IMREAD_GRAYSCALE)  
+def read_batch(data): # read random image and its annotaion from  the dataset (LabPics)
 
-    r = np.min([max_res / img.shape[1], max_res / img.shape[0]])  
-    img = cv2.resize(img, (int(img.shape[1] * r), int(img.shape[0] * r)))  
-    ann_map = cv2.resize(ann_map, (int(ann_map.shape[1] * r), int(ann_map.shape[0] * r)), interpolation=cv2.INTER_NEAREST)  
+   #  select image
 
-    # Ensure binary
-    ann_map = (ann_map > 127).astype(np.uint8) * 255  
+        ent  = data[np.random.randint(len(data))] # choose random entry
+        Img = cv2.imread(ent["image"])[...,::-1]  # read image
+        ann_map = cv2.imread(ent["annotation"]) # read annotation
 
-    masks = []
-    points = []
+   # resize image
 
-    # Find contours
-    contours, _ = cv2.findContours((255 - ann_map).copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        r = np.min([1024 / Img.shape[1], 1024 / Img.shape[0]]) # scalling factor
+        Img = cv2.resize(Img, (int(Img.shape[1] * r), int(Img.shape[0] * r)))
+        ann_map = cv2.resize(ann_map, (int(ann_map.shape[1] * r), int(ann_map.shape[0] * r)),interpolation=cv2.INTER_NEAREST)
 
-    for i, contour in enumerate(contours):
-        if len(contour) >= 3:
-            mask = np.zeros_like(ann_map)
-            cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
-            
-            # Compute centroid using image moments
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                if (cx != 0 and cy != 0):
-                    points.append([[cx, cy]])
-                    masks.append(mask)
+   # merge vessels and materials annotations
 
-    return img, np.array(masks), np.array(points), np.ones([len(masks), 1])
+        mat_map = ann_map[:,:,0] # material annotation map
+        ves_map = ann_map[:,:,2] # vessel  annotaion map
+        mat_map[mat_map==0] = ves_map[mat_map==0]*(mat_map.max()+1) # merge maps
+
+   # Get binary masks and points
+
+        inds = np.unique(mat_map)[1:] # load all indices
+        points= []
+        masks = []
+        for ind in inds:
+            mask=(mat_map == ind).astype(np.uint8) # make binary mask corresponding to index ind
+            masks.append(mask)
+            coords = np.argwhere(mask > 0) # get all coordinates in mask
+            yx = np.array(coords[np.random.randint(len(coords))]) # choose random point/coordinate
+            points.append([[yx[1], yx[0]]])
+        print(len(points), len(masks))
+        return Img,np.array(masks),np.array(points), np.ones([len(masks),1])
 
 def visualize_entry(img, masks, points):
     # Plot the input image
@@ -104,7 +104,6 @@ def visualize_entry(img, masks, points):
 # for i in range(40):
 #     image, masks, input_point, input_label = read_batch(data)
 #     visualize_entry(image, masks, input_point)
-
 
 def visualize_training_results(image, masks, predicted_mask, iou, itr):
     # Plot the input image
@@ -140,7 +139,6 @@ def visualize_training_results(image, masks, predicted_mask, iou, itr):
     plt.legend()
     plt.show()
 
-mean_iou = 0
 # Inside your training loop:
 for itr in range(100000):
     with torch.cuda.amp.autocast(): # cast to mixed precision
@@ -177,7 +175,7 @@ for itr in range(100000):
         prd_masks = predictor._transforms.postprocess_masks(low_res_masks, predictor._orig_hw[-1])
 
         # Segmentation Loss calculation
-        gt_mask = torch.tensor((masks / 255).astype(np.float32)).cuda()
+        gt_mask = torch.tensor(masks.astype(np.float32)).cuda()
         prd_mask = torch.sigmoid(prd_masks[:, 0])  # Turn logit map to probability map
         seg_loss = (-gt_mask * torch.log(prd_mask + 0.00001) - (1 - gt_mask) * torch.log((1 - prd_mask) + 0.00001)).mean()
         print("gt_mask min:", gt_mask.min().item(), "gt_mask max:", gt_mask.max().item())
@@ -199,6 +197,9 @@ for itr in range(100000):
             torch.save(predictor.model.state_dict(), "model.torch")
             print("Saved model.")
 
+        # Track IoU
+        if itr == 0:
+            mean_iou = 0
         mean_iou = mean_iou * 0.99 + 0.01 * np.mean(iou.cpu().detach().numpy())
         print(f"step {itr} Accuracy (IoU) = {mean_iou}")
 
