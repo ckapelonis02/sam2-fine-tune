@@ -3,9 +3,14 @@ import torch
 import cv2
 import hydra
 import matplotlib.pyplot as plt
+import os
 from PIL import Image
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+
+# Configurations
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # use bfloat16 for the entire script (memory efficient)
 torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
@@ -30,7 +35,7 @@ def show_anns(anns, borders=True):
             contours, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) 
             # Try to smooth contours
             contours = [cv2.approxPolyDP(contour, epsilon=0.01, closed=True) for contour in contours]
-            cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=1) 
+            cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=2) 
 
     ax.imshow(img)
 
@@ -43,6 +48,8 @@ sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda")
 
 mask_generator = SAM2AutomaticMaskGenerator(
     sam2_model,
+    points_per_side=32,
+    points_per_batch=8,
     # load_model="model.torch"
     )
 
