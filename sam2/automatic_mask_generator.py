@@ -250,6 +250,16 @@ class SAM2AutomaticMaskGenerator:
         points_scale = np.array(cropped_im_size)[None, ::-1]
         points_for_image = self.point_grids[crop_layer_idx] * points_scale
 
+        # Visualize point prompts used by the mask generator
+        # import cv2
+        # debug_img = cv2.cvtColor(cropped_im, cv2.COLOR_RGB2BGR)
+        # for xy in points_for_image:
+        #     pt_xy = xy.astype(np.int32).tolist()
+        #     cv2.circle(debug_img, pt_xy, 2, (255,0,255), -1)
+        # cv2.imshow("DebugPoints", debug_img)
+        # cv2.waitKey(0)
+        # cv2.destroyWindow("DebugPoints")
+
         # Generate masks for this crop in batches
         data = MaskData()
         for (points,) in batch_iterator(self.points_per_batch, points_for_image):

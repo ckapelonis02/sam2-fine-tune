@@ -8,4 +8,6 @@ build/*
 _C.*
 outputs/*
 checkpoints/*.pt
-*.torch
+checkpoints/*.torch
+data/*
+results/*

@@ -8,15 +8,6 @@ from PIL import Image
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
-# Configurations
-# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
-# use bfloat16 for the entire script (memory efficient)
-torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
-
-np.random.seed(3)
-
 def show_anns(anns, borders=True):
     if len(anns) == 0:
         return
@@ -38,28 +29,3 @@ def show_anns(anns, borders=True):
             cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=2) 
 
     ax.imshow(img)
-
-# Load model you need to have pretrained model already made
-hydra.core.global_hydra.GlobalHydra.instance().clear()
-hydra.initialize_config_module('sam2', version_base='1.2')
-sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
-model_cfg = "../sam2_configs/sam2_hiera_t.yaml"
-sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda")
-
-mask_generator = SAM2AutomaticMaskGenerator(
-    sam2_model,
-    points_per_side=32,
-    points_per_batch=8,
-    # load_model="model.torch"
-    )
-
-image = Image.open('butterfly.jpg')
-image = np.array(image.convert("RGB"))
-masks = mask_generator.generate(image)
-
-print(len(masks))
-plt.figure(figsize=(20, 20))
-plt.imshow(image)
-show_anns(masks)
-plt.axis('off')
-plt.show()
