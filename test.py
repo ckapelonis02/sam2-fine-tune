@@ -27,10 +27,10 @@ sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda", apply_postpro
 
 mask_generator = SAM2AutomaticMaskGenerator(
     model=sam2_model,
-    points_per_side=32,
+    points_per_side=16,
     points_per_batch=4,
     pred_iou_thresh=0.88,
-    stability_score_thresh=0.7,
+    stability_score_thresh=0.8,
     stability_score_offset=1.0,
     mask_threshold=0.6,
     box_nms_thresh=0.1,
@@ -43,7 +43,7 @@ mask_generator = SAM2AutomaticMaskGenerator(
     # output_mode="binary_mask",
     # use_m2m=True,
     # multimask_output=False,
-    load_model=None
+    # load_model="checkpoints/model.torch"
 )
 
 
