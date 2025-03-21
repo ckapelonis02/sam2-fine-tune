@@ -3,9 +3,12 @@ import numpy as np
 import torch
 import cv2
 import os
+import random
 import matplotlib.pyplot as plt
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
+from sam2.train_helper import read_batch
+from sam2.train_helper import read_dataset
 
 # Configurations
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -13,138 +16,43 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 hydra.core.global_hydra.GlobalHydra.instance().clear()
 hydra.initialize_config_module('sam2', version_base='1.2')
-sam2_checkpoint = "checkpoints/sam2_hiera_tiny.pt"
-model_cfg = "../sam2_configs/sam2_hiera_t.yaml"
 
-sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda")
+sam2_model = build_sam2(
+    config_file="../sam2_configs/sam2_hiera_t.yaml",
+    ckpt_path="checkpoints/sam2_hiera_tiny.pt",
+    device="cuda",
+    apply_postprocessing=False
+)
+
 predictor = SAM2ImagePredictor(sam2_model)
+predictor.model.sam_mask_decoder.train(True)
+predictor.model.sam_prompt_encoder.train(True)
+optimizer = torch.optim.AdamW(
+    params=predictor.model.parameters(),
+    lr=1e-5,
+    weight_decay=4e-5
+)
 
-max_res = 1024
+scaler = torch.cuda.amp.GradScaler()
 
-predictor.model.sam_mask_decoder.train(True) # enable training of mask decoder
-predictor.model.sam_prompt_encoder.train(True) # enable training of prompt encoder
+with open("/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/sorted_images.txt", "r") as file:
+    file_names = [int(line.strip()) for line in file]
 
-optimizer = torch.optim.AdamW(params=predictor.model.parameters(), lr=1e-5, weight_decay=4e-5)
-scaler = torch.cuda.amp.GradScaler() # mixed precision
+data_size = 1000
+top_files = file_names[:data_size]
 
+random.shuffle(top_files)
 
-# Reading the data paths
-data_dir = "/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/"
-# data_dir = "/home/ckapelonis/Desktop/thesis/thesis-code/"
-data = []
-for name in os.listdir(data_dir + "output_images_original/"):
-    data.append(
-        {
-        "image": data_dir + "output_images_original/" + name,
-        "annotation": data_dir + "output_images_mask/" + name[:-4] + ".png"
-        }
-    )
-
-def read_batch(data):
-    ent = data[np.random.randint(len(data))]
-    img = cv2.imread(ent["image"])[..., ::-1]  
-    ann_map = cv2.imread(ent["annotation"], cv2.IMREAD_GRAYSCALE)  
-
-    r = np.min([max_res / img.shape[1], max_res / img.shape[0]])  
-    img = cv2.resize(img, (int(img.shape[1] * r), int(img.shape[0] * r)))  
-    ann_map = cv2.resize(ann_map, (int(ann_map.shape[1] * r), int(ann_map.shape[0] * r)), interpolation=cv2.INTER_NEAREST)  
-
-    # Ensure binary
-    ann_map = (ann_map > 127).astype(np.uint8) * 255  
-
-    masks = []
-    points = []
-
-    # Find contours
-    contours, _ = cv2.findContours((255 - ann_map).copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    for i, contour in enumerate(contours):
-        if len(contour) >= 3:
-            mask = np.zeros_like(ann_map)
-            cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
-            
-            # Compute centroid using image moments
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                if (cx != 0 and cy != 0):
-                    points.append([[cx, cy]])
-                    masks.append(mask)
-
-    return img, np.array(masks), np.array(points), np.ones([len(masks), 1])
-
-def visualize_entry(img, masks, points):
-    # Plot the input image
-    plt.figure(figsize=(8, 8))
-    plt.imshow(img)
-    plt.title("Input Image (Resized)")
-    plt.axis("on")
-    plt.show()
-
-    # Plot the combined binary annotation mask
-    plt.figure(figsize=(8, 8))
-    combined_mask = np.zeros_like(masks[0], dtype=np.uint8)
-    for mask in masks:
-        combined_mask = np.maximum(combined_mask, mask)  
-    plt.imshow(combined_mask, cmap='gray')  
-    plt.title("Combined Mask (Tesserae in White)")
-    plt.axis("on")
-    plt.show()
-
-    # Plot the image with truly random points inside tesserae
-    plt.figure(figsize=(8, 8))
-    plt.imshow(img)
-    for point in points:
-        plt.plot(point[0][0], point[0][1], 'ro', markersize=2)
-    plt.title("Image with Randomly Distributed Points")
-    plt.axis("on")
-    plt.show()
-
-# for i in range(40):
-#     image, masks, input_point, input_label = read_batch(data)
-#     visualize_entry(image, masks, input_point)
-
-
-def visualize_training_results(image, masks, predicted_mask, iou, itr):
-    # Plot the input image
-    plt.figure(figsize=(8, 8))
-    plt.imshow(image)
-    plt.title("Input Image (Resized)")
-    plt.axis("on")
-    plt.show()
-
-    # Plot the ground truth mask
-    plt.figure(figsize=(8, 8))
-    combined_mask = np.zeros_like(masks[0], dtype=np.uint8)
-    for mask in masks:
-        combined_mask = np.maximum(combined_mask, mask)
-    plt.imshow(combined_mask, cmap='gray')
-    plt.title("Ground Truth Mask")
-    plt.axis("on")
-    plt.show()
-
-    # Plot the predicted mask
-    plt.figure(figsize=(8, 8))
-    plt.imshow(predicted_mask[0, 0].cpu().detach().numpy(), cmap='gray')
-    plt.title("Predicted Mask")
-    plt.axis("on")
-    plt.show()
-
-    # Plot the IoU score over time
-    plt.figure(figsize=(8, 8))
-    plt.plot(itr, iou, label="IoU")
-    plt.xlabel('Iterations')
-    plt.ylabel('IoU')
-    plt.title("IoU Over Time")
-    plt.legend()
-    plt.show()
+data_dict = read_dataset(
+    images_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/ancient_images",
+    masks_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_mask",
+    file_names=top_files
+)
 
 mean_iou = 0
-# Inside your training loop:
 for itr in range(100000):
-    with torch.cuda.amp.autocast(): # cast to mixed precision
-        image, masks, input_point, input_label = read_batch(data)
+    with torch.cuda.amp.autocast():
+        image, masks, input_point, input_label = read_batch(data_dict, itr % data_size)
         if (masks.shape[0] == 0):
             continue
         # visualize_entry(image, masks, input_point)
@@ -180,8 +88,6 @@ for itr in range(100000):
         gt_mask = torch.tensor((masks / 255).astype(np.float32)).cuda()
         prd_mask = torch.sigmoid(prd_masks[:, 0])  # Turn logit map to probability map
         seg_loss = (-gt_mask * torch.log(prd_mask + 0.00001) - (1 - gt_mask) * torch.log((1 - prd_mask) + 0.00001)).mean()
-        print("gt_mask min:", gt_mask.min().item(), "gt_mask max:", gt_mask.max().item())
-
 
         # Score loss calculation (intersection over union) IoU
         inter = (gt_mask * (prd_mask > 0.5)).sum(1).sum(1)
@@ -196,10 +102,10 @@ for itr in range(100000):
         scaler.update()  # Mix precision
 
         if itr % 100 == 0:
-            torch.save(predictor.model.state_dict(), "model.torch")
+            torch.save(predictor.model.state_dict(), f"model{itr}.torch")
             print("Saved model.")
 
         mean_iou = mean_iou * 0.99 + 0.01 * np.mean(iou.cpu().detach().numpy())
         print(f"step {itr} Accuracy (IoU) = {mean_iou}")
 
-        visualize_training_results(image, masks, prd_masks, mean_iou, itr)
+        # visualize_training_results(image, masks, prd_masks, mean_iou, itr)
