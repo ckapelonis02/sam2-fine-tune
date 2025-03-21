@@ -9,6 +9,10 @@ from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sam2.train_helper import read_batch
 from sam2.train_helper import read_dataset
+from sam2.train_helper import visualize_entry
+from sam2.train_helper import cleanup
+
+cleanup()
 
 # Configurations
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -44,18 +48,19 @@ top_files = file_names[:data_size]
 random.shuffle(top_files)
 
 data_dict = read_dataset(
-    images_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/ancient_images",
+    images_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_original",
     masks_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_mask",
     file_names=top_files
 )
 
 mean_iou = 0
+max_masks = 75
 for itr in range(100000):
     with torch.cuda.amp.autocast():
-        image, masks, input_point, input_label = read_batch(data_dict, itr % data_size)
+        image, masks, input_point, input_label = read_batch(data_dict, itr % data_size, max_masks)
         if (masks.shape[0] == 0):
             continue
-        # visualize_entry(image, masks, input_point)
+        visualize_entry(image, masks, input_point)
 
         # Segment the image using SAM
         predictor.set_image(image)  # apply SAM image encoder to the image
@@ -101,11 +106,12 @@ for itr in range(100000):
         scaler.step(optimizer)
         scaler.update()  # Mix precision
 
-        if itr % 100 == 0:
+        if (itr % 500 == 0):
             torch.save(predictor.model.state_dict(), f"model{itr}.torch")
             print("Saved model.")
 
         mean_iou = mean_iou * 0.99 + 0.01 * np.mean(iou.cpu().detach().numpy())
-        print(f"step {itr} Accuracy (IoU) = {mean_iou}")
+        if (itr % 100 == 0):
+            print(f"step {itr} Accuracy (IoU) = {mean_iou}")
 
         # visualize_training_results(image, masks, prd_masks, mean_iou, itr)

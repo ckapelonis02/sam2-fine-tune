@@ -3,10 +3,14 @@ import numpy as np
 import torch
 import cv2
 import os
+import gc
 import matplotlib.pyplot as plt
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
+def cleanup():
+    gc.collect()
+    torch.cuda.empty_cache()
 
 def read_dataset(images_path, masks_path, file_names):
     data = [
@@ -19,7 +23,7 @@ def read_dataset(images_path, masks_path, file_names):
 
     return data
 
-def read_batch(data_dict, index, max_res=1024):
+def read_batch(data_dict, index, max_masks, max_res=1024):
     ent = data_dict[index]
     img = cv2.imread(ent["image"])[..., ::-1]  
     ann_map = cv2.imread(ent["masks"], cv2.IMREAD_GRAYSCALE)  
@@ -38,6 +42,7 @@ def read_batch(data_dict, index, max_res=1024):
     contours, _ = cv2.findContours((255 - ann_map).copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     for i, contour in enumerate(contours):
+        if (i == max_masks): break
         if len(contour) >= 3:
             mask = np.zeros_like(ann_map)
             cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
