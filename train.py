@@ -23,7 +23,7 @@ hydra.initialize_config_module('sam2', version_base='1.2')
 
 sam2_model = build_sam2(
     config_file="../sam2_configs/sam2_hiera_t.yaml",
-    ckpt_path="checkpoints/sam2_hiera_tiny.pt",
+    ckpt_path="/kaggle/input/segment-anything-2/pytorch/sam2-hiera-tiny/1/sam2_hiera_tiny.pt",
     device="cuda",
     apply_postprocessing=False
 )
@@ -39,7 +39,7 @@ optimizer = torch.optim.AdamW(
 
 scaler = torch.cuda.amp.GradScaler()
 
-with open("/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/sorted_images.txt", "r") as file:
+with open("/kaggle/input/mosaic-data-4k/sorted_ancient.txt", "r") as file:
     file_names = [int(line.strip()) for line in file]
 
 data_size = 1000
@@ -48,8 +48,8 @@ top_files = file_names[:data_size]
 random.shuffle(top_files)
 
 data_dict = read_dataset(
-    images_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_original",
-    masks_path="/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_mask",
+    images_path="/kaggle/input/mosaic-data-4k/ancient_images",
+    masks_path="/kaggle/input/mosaic-data-4k/masks",
     file_names=top_files
 )
 
@@ -60,7 +60,7 @@ for itr in range(100000):
         image, masks, input_point, input_label = read_batch(data_dict, itr % data_size, max_masks)
         if (masks.shape[0] == 0):
             continue
-        visualize_entry(image, masks, input_point)
+        # visualize_entry(image, masks, input_point)
 
         # Segment the image using SAM
         predictor.set_image(image)  # apply SAM image encoder to the image
