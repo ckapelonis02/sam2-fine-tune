@@ -29,23 +29,23 @@ sam2_model = build_sam2(
 
 mask_generator = SAM2AutomaticMaskGenerator(
     model=sam2_model,
-    points_per_side=32,
+    points_per_side=64,
     points_per_batch=4,
     pred_iou_thresh=0.8,
     stability_score_thresh=0.8,
     stability_score_offset=1.0,
     mask_threshold=0.6,
-    box_nms_thresh=0.1,
+    box_nms_thresh=0.7,
     crop_n_layers=2,
     crop_nms_thresh=0.7,
-    crop_overlap_ratio=0.5,
+    # crop_overlap_ratio=0.3,
     crop_n_points_downscale_factor=2,
-    point_grids=None,
+    # point_grids=None,
     min_mask_region_area=25.0,
     # output_mode="binary_mask",
-    # use_m2m=True,
-    # multimask_output=False,
-    load_model="checkpoints/model2500ancient_2k_cropped.torch"
+    use_m2m=False,
+    multimask_output=True,
+    # load_model="checkpoints/model2500ancient_2k_cropped.torch"
 )
 
 start_time = time.time()
@@ -53,9 +53,9 @@ test_generator(
     mask_generator=mask_generator,
     img_path="data/images/done/butterfly.jpg",
     output_path=f"results/masks_{time.time()}.png",
-    rows=2,
-    cols=2,
-    max_mask_crop_region=0.05,
+    rows=1,
+    cols=1,
+    max_mask_crop_region=0.1,
     show_masks=False
 )
 print(f"Time taken: {time.time() - start_time}")

@@ -215,7 +215,7 @@ class SAM2AutomaticMaskGenerator:
         # Iterate over image crops
         data = MaskData()
         for crop_box, layer_idx in zip(crop_boxes, layer_idxs):
-            crop_data = self._process_crop(image, crop_box, layer_idx, orig_size)
+            crop_data = self._process_crop(image, crop_box, layer_idx, orig_size, visualize_point_prompts=False)
             data.cat(crop_data)
 
         # Remove duplicate masks between crops
@@ -239,6 +239,7 @@ class SAM2AutomaticMaskGenerator:
         crop_box: List[int],
         crop_layer_idx: int,
         orig_size: Tuple[int, ...],
+        visualize_point_prompts: bool = False
     ) -> MaskData:
         # Crop the image and calculate embeddings
         x0, y0, x1, y1 = crop_box
@@ -251,14 +252,15 @@ class SAM2AutomaticMaskGenerator:
         points_for_image = self.point_grids[crop_layer_idx] * points_scale
 
         # Visualize point prompts used by the mask generator
-        # import cv2
-        # debug_img = cv2.cvtColor(cropped_im, cv2.COLOR_RGB2BGR)
-        # for xy in points_for_image:
-        #     pt_xy = xy.astype(np.int32).tolist()
-        #     cv2.circle(debug_img, pt_xy, 2, (255,0,255), -1)
-        # cv2.imshow("DebugPoints", debug_img)
-        # cv2.waitKey(0)
-        # cv2.destroyWindow("DebugPoints")
+        if (visualize_point_prompts):
+            import cv2
+            debug_img = cv2.cvtColor(cropped_im, cv2.COLOR_RGB2BGR)
+            for xy in points_for_image:
+                pt_xy = xy.astype(np.int32).tolist()
+                cv2.circle(debug_img, pt_xy, 2, (255,0,255), -1)
+            cv2.imshow("DebugPoints", debug_img)
+            cv2.waitKey(0)
+            cv2.destroyWindow("DebugPoints")
 
         # Generate masks for this crop in batches
         data = MaskData()
