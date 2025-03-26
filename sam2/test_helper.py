@@ -31,15 +31,25 @@ def show_anns(anns, borders=True):
 
     ax.imshow(img)
 
-def test_generator(mask_generator, img_path, output_path, rows, cols, max_mask_crop_region, show_masks=False):
+def test_generator(mask_generator, img_path, output_path, rows, cols, max_mask_crop_region, overlap_ratio=0.1, show_masks=False):
     image = Image.open(img_path)
     width, height = image.size
 
     crop_regions = []
     cell_width, cell_height = width // cols, height // rows
+
+    # Calculate overlap amount
+    overlap_width = int(cell_width * overlap_ratio)
+    overlap_height = int(cell_height * overlap_ratio)
+
     for i in range(rows):
         for j in range(cols):
-            crop_regions.append((j * cell_width, i * cell_height, (j + 1) * cell_width, (i + 1) * cell_height))
+            # Define crop regions with overlap
+            left = max(j * cell_width - overlap_width, 0)
+            upper = max(i * cell_height - overlap_height, 0)
+            right = min((j + 1) * cell_width + overlap_width, width)
+            lower = min((i + 1) * cell_height + overlap_height, height)
+            crop_regions.append((left, upper, right, lower))
 
     final_mask = np.zeros((height, width, 3), dtype=np.uint8)
 
@@ -48,27 +58,27 @@ def test_generator(mask_generator, img_path, output_path, rows, cols, max_mask_c
         cropped_image = image.crop(crop)
         cropped_image_np = np.array(cropped_image.convert("RGB"))
         masks = mask_generator.generate(cropped_image_np)
-        
+
         print(f"{len(masks)} masks found")
 
-        if (show_masks):     
+        if show_masks:     
             plt.figure(figsize=(12, 12))
             plt.imshow(cropped_image_np)
             show_anns(masks)
             plt.axis('off')
             plt.show()
-        
-        mask_overlay = np.zeros_like(cropped_image_np)
+
+        mask_overlay = np.zeros_like(cropped_image_np, dtype=np.uint8)
         max_area_threshold = (cell_width * cell_height) * max_mask_crop_region
 
         for mask in masks:
             mask_area = np.sum(mask['segmentation'])  # Count mask pixels
-
             if mask_area < max_area_threshold:  # Only keep masks below the threshold
                 mask_overlay[mask['segmentation']] = (255, 255, 255)  # White for visibility
-        
+
+        # Apply logical OR instead of overwriting
         x1, y1, x2, y2 = crop
-        final_mask[y1:y2, x1:x2] = mask_overlay
+        final_mask[y1:y2, x1:x2] = np.maximum(final_mask[y1:y2, x1:x2], mask_overlay)
 
     final_mask_pil = Image.fromarray(final_mask)
     final_mask_pil.save(output_path)

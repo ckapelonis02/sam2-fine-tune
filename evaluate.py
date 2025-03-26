@@ -52,6 +52,6 @@ def compute_metrics_batch(gt_masks_dir, pred_masks_dir):
     return results
 
 
-# gt, pred = read_masks("data/masks/done/butterfly.png", "results/masks_1742652848.3033705.png")
+# gt, pred = read_masks("data/masks/done/butterfly.png", "results/masks_1742996214.3564394.png")
 # print(evaluate_pred(gt, pred))
 # print(compute_metrics_batch("data/masks/done/", "results/"))

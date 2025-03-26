@@ -22,15 +22,15 @@ hydra.initialize_config_module('sam2', version_base='1.2')
 
 sam2_model = build_sam2(
     config_file="../sam2_configs/sam2_hiera_t.yaml",
-    ckpt_path="/kaggle/input/segment-anything-2/pytorch/sam2-hiera-tiny/1/sam2_hiera_tiny.pt",
+    ckpt_path="checkpoints/sam2_hiera_tiny.pt",
     device="cuda",
     apply_postprocessing=False
 )
 
 mask_generator = SAM2AutomaticMaskGenerator(
     model=sam2_model,
-    points_per_side=128,
-    points_per_batch=16,
+    points_per_side=32,
+    points_per_batch=4,
     pred_iou_thresh=0.8,
     stability_score_thresh=0.8,
     stability_score_offset=1.0,
@@ -45,17 +45,17 @@ mask_generator = SAM2AutomaticMaskGenerator(
     # output_mode="binary_mask",
     # use_m2m=True,
     # multimask_output=False,
-    load_model="model6500.torch"
+    load_model="checkpoints/model2500ancient_2k_cropped.torch"
 )
 
 start_time = time.time()
 test_generator(
     mask_generator=mask_generator,
-    img_path="/kaggle/input/mosaic-images/butterfly.jpg",
+    img_path="data/images/done/butterfly.jpg",
     output_path=f"results/masks_{time.time()}.png",
-    rows=1,
-    cols=1,
-    max_mask_crop_region=0.2,
-    show_masks=True
+    rows=2,
+    cols=2,
+    max_mask_crop_region=0.05,
+    show_masks=False
 )
 print(f"Time taken: {time.time() - start_time}")
