@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import argparse
+import pprint
 import os
 
 def read_masks(gt_mask_path, pred_mask_path):
@@ -53,4 +54,35 @@ def compute_metrics_batch(gt_masks_dir, pred_masks_dir):
 
 # gt, pred = read_masks("data/masks/done/butterfly.png", "masks_1743012826.658254.png")
 # print(evaluate_pred(gt, pred))
-# print(compute_metrics_batch("data/masks/done/", "results/"))
+# pprint.pprint(compute_metrics_batch("data/masks/done/", "/home/ckapelonis/Downloads/fine-tuned/"))
+import pandas as pd
+
+# First run
+results1 = compute_metrics_batch("data/masks/done/", "/home/ckapelonis/Downloads/fine-tuned/")
+
+# Second run
+results2 = compute_metrics_batch("data/masks/done/", "/home/ckapelonis/Downloads/base_pred/")
+
+# Store all metrics in a dictionary for each model
+metrics = ["IoU", "Precision", "Recall", "Accuracy", "Dice Coefficient"]
+fine_tuned_metrics = {}
+base_metrics = {}
+
+for metric in metrics:
+    fine_tuned_metrics[metric] = {file: res[metric] for file, res in results1.items()}
+    base_metrics[metric] = {file: res[metric] for file, res in results2.items()}
+
+# Convert dictionaries to DataFrames
+df_fine_tuned = pd.DataFrame(fine_tuned_metrics)
+df_base = pd.DataFrame(base_metrics)
+
+# Compute mean across all images
+mean_fine_tuned = df_fine_tuned.mean().rename("Mean_Fine-Tuned")
+mean_base = df_base.mean().rename("Mean_Base")
+
+# Combine means into a single DataFrame
+mean_comparison = pd.DataFrame([mean_fine_tuned, mean_base]).T
+
+# Print results
+print("\n### Mean Metrics Comparison ###")
+print(mean_comparison)
