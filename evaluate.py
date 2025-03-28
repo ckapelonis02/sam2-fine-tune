@@ -63,25 +63,32 @@ results1 = compute_metrics_batch("data/masks/done/", "/home/ckapelonis/Downloads
 # Second run
 results2 = compute_metrics_batch("data/masks/done/", "/home/ckapelonis/Downloads/base_pred/")
 
+results3 = compute_metrics_batch("data/masks/done/", "/home/ckapelonis/Downloads/fine-tuned-hd/")
+
 # Store all metrics in a dictionary for each model
 metrics = ["IoU", "Precision", "Recall", "Accuracy", "Dice Coefficient"]
 fine_tuned_metrics = {}
 base_metrics = {}
+fine_tuned_hd_metrics = {}
 
 for metric in metrics:
     fine_tuned_metrics[metric] = {file: res[metric] for file, res in results1.items()}
     base_metrics[metric] = {file: res[metric] for file, res in results2.items()}
+    fine_tuned_hd_metrics[metric] = {file: res[metric] for file, res in results3.items()}
+
 
 # Convert dictionaries to DataFrames
 df_fine_tuned = pd.DataFrame(fine_tuned_metrics)
 df_base = pd.DataFrame(base_metrics)
+df_fine_tuned_hd = pd.DataFrame(fine_tuned_hd_metrics)
 
 # Compute mean across all images
 mean_fine_tuned = df_fine_tuned.mean().rename("Mean_Fine-Tuned")
 mean_base = df_base.mean().rename("Mean_Base")
+mean_fine_tuned_hd = df_fine_tuned_hd.mean().rename("HD Mean_Fine-Tuned")
 
 # Combine means into a single DataFrame
-mean_comparison = pd.DataFrame([mean_fine_tuned, mean_base]).T
+mean_comparison = pd.DataFrame([mean_base, mean_fine_tuned, mean_fine_tuned_hd]).T
 
 # Print results
 print("\n### Mean Metrics Comparison ###")
