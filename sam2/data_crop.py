@@ -26,8 +26,8 @@ def split_image(img, divisions=24):
 
 def process_images_in_folder(input_folder, divisions=24):
     # Get all .jpg files in the input folder
-    # image_files = [f for f in os.listdir(input_folder) if f.endswith(".jpg")]
-    image_files = [f for f in os.listdir(input_folder) if f.endswith(".png")]
+    image_files = [f for f in os.listdir(input_folder) if f.endswith(".jpg")]
+    # image_files = [f for f in os.listdir(input_folder) if f.endswith(".png")]
     image_files.sort(key=lambda x: int(os.path.splitext(x)[0]))
 
     count = 1  # Counter for naming sub-images sequentially
@@ -41,14 +41,14 @@ def process_images_in_folder(input_folder, divisions=24):
 
         # Save each sub-image
         for sub_img in sub_images:
-            # filename = f"{count}.jpg"  # Name sub-image sequentially
-            filename = f"{count}.png"  # Name sub-image sequentially
+            filename = f"{count}.jpg"  # Name sub-image sequentially
+            # filename = f"{count}.png"  # Name sub-image sequentially
             sub_img_bgr = cv2.cvtColor(sub_img, cv2.COLOR_RGB2BGR)  # Convert back to BGR
             cv2.imwrite(filename, sub_img_bgr)  # Save the sub-image
             print(f"Saved: {filename}")
             count += 1  # Increment the counter for the next sub-image
 
 # Example usage:
-# input_folder = "/home/ckapelonis/Downloads/output_images_original"  # Specify the folder containing your .jpg files
-input_folder = "/home/ckapelonis/Downloads/output_images_mask"  # Specify the folder containing your .jpg files
-process_images_in_folder(input_folder, divisions=24)  # Process all images and split them
+input_folder = "/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_original"  # Specify the folder containing your .jpg files
+# input_folder = "/home/ckapelonis/Desktop/thesis/thesis-code/mosaic_generator/data/output_images_mask"  # Specify the folder containing your .jpg files
+process_images_in_folder(input_folder, divisions=20)  # Process all images and split them

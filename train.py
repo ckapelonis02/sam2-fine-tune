@@ -1,117 +1,94 @@
-import hydra
-import numpy as np
 import torch
-import cv2
-import os
+import numpy as np
 import random
-import matplotlib.pyplot as plt
+import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
+from tqdm import tqdm
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from sam2.train_helper import read_batch
-from sam2.train_helper import read_dataset
-from sam2.train_helper import visualize_entry
-from sam2.train_helper import cleanup
+from sam2.train_helper import *
 
 cleanup()
 
-# Configurations
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
-hydra.core.global_hydra.GlobalHydra.instance().clear()
-hydra.initialize_config_module('sam2', version_base='1.2')
-
+# Model Initialization
 sam2_model = build_sam2(
     config_file="../sam2_configs/sam2_hiera_t.yaml",
     ckpt_path="/kaggle/input/segment-anything-2/pytorch/sam2-hiera-tiny/1/sam2_hiera_tiny.pt",
     device="cuda",
     apply_postprocessing=False
 )
-
 predictor = SAM2ImagePredictor(sam2_model)
 predictor.model.sam_mask_decoder.train(True)
 predictor.model.sam_prompt_encoder.train(True)
-optimizer = torch.optim.AdamW(
-    params=predictor.model.parameters(),
-    lr=1e-5,
-    weight_decay=4e-5
-)
 
+# Optimizer & Scheduler
+optimizer = optim.AdamW(predictor.model.parameters(), lr=1e-5, weight_decay=4e-5)
+scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=10000, eta_min=1e-7)
 scaler = torch.cuda.amp.GradScaler()
 
-with open("/kaggle/input/mosaic-data-4k/sorted_ancient.txt", "r") as file:
-    file_names = [int(line.strip()) for line in file]
+# Dataset Configuration
+data_size = 2000
+file_names = list(range(1, data_size + 1))
+train_size = int(0.8 * data_size)
+train_files, val_files = file_names[:train_size], file_names[train_size:]
 
-data_size = 1000
-top_files = file_names[:data_size]
+train_data = read_dataset("/kaggle/input/data-2k-cropped/images", "/kaggle/input/data-2k-cropped/masks", train_files)
+val_data = read_dataset("/kaggle/input/data-2k-cropped/images", "/kaggle/input/data-2k-cropped/masks", val_files)
 
-random.shuffle(top_files)
+# Training Parameters
+max_masks = 150
+epochs = 10
+best_val_iou = 0.0
+gradient_accumulation_steps = 4
+patience = 3  # Number of epochs to wait before early stopping
+no_improvement_count = 0  # Counter for no improvement in validation IoU
 
-data_dict = read_dataset(
-    images_path="/kaggle/input/mosaic-data-4k/ancient_images",
-    masks_path="/kaggle/input/mosaic-data-4k/masks",
-    file_names=top_files
-)
+# Training Loop
+for epoch in range(epochs):
+    total_iou = 0
+    total_loss = 0
+    random.shuffle(train_files)
+    
+    print(f"\nEpoch {epoch+1}/{epochs}")
 
-mean_iou = 0
-max_masks = 75
-for itr in range(100000):
-    with torch.cuda.amp.autocast():
-        image, masks, input_point, input_label = read_batch(data_dict, itr % data_size, max_masks)
-        if (masks.shape[0] == 0):
-            continue
-        # visualize_entry(image, masks, input_point)
+    for itr in tqdm(range(train_size), desc="Training Progress"):
+        with torch.cuda.amp.autocast():
+            image, masks, input_point, input_label = read_batch(train_data, itr % train_size, max_masks)
+            prd_mask, prd_scores, gt_mask = process_batch(predictor, image, masks, input_point, input_label)
 
-        # Segment the image using SAM
-        predictor.set_image(image)  # apply SAM image encoder to the image
+            if prd_mask is None:
+                continue
 
-        # Prompt encoding
-        mask_input, unnorm_coords, labels, unnorm_box = predictor._prep_prompts(
-            input_point, input_label, box=None, mask_logits=None, normalize_coords=True
-            )
-        sparse_embeddings, dense_embeddings = predictor.model.sam_prompt_encoder(
-            points=(unnorm_coords, labels), boxes=None, masks=None
-            )
+            iou, loss = compute_iou_loss(prd_mask, prd_scores, gt_mask)
+            loss = loss / gradient_accumulation_steps
 
-        # Mask decoder
-        batched_mode = unnorm_coords.shape[0] > 1  # multi object prediction
-        high_res_features = [feat_level[-1].unsqueeze(0) for feat_level in predictor._features["high_res_feats"]]
-        low_res_masks, prd_scores, _, _ = predictor.model.sam_mask_decoder(
-            image_embeddings=predictor._features["image_embed"][-1].unsqueeze(0),
-            image_pe=predictor.model.sam_prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=sparse_embeddings,
-            dense_prompt_embeddings=dense_embeddings,
-            multimask_output=True,
-            repeat_image=batched_mode,
-            high_res_features=high_res_features
-            )
+            scaler.scale(loss).backward()
 
-        # Upscale the masks to the original image resolution
-        prd_masks = predictor._transforms.postprocess_masks(low_res_masks, predictor._orig_hw[-1])
+            if (itr + 1) % gradient_accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                predictor.model.zero_grad()
 
-        # Segmentation Loss calculation
-        gt_mask = torch.tensor((masks / 255).astype(np.float32)).cuda()
-        prd_mask = torch.sigmoid(prd_masks[:, 0])  # Turn logit map to probability map
-        seg_loss = (-gt_mask * torch.log(prd_mask + 0.00001) - (1 - gt_mask) * torch.log((1 - prd_mask) + 0.00001)).mean()
+            scheduler.step()
+            total_iou += iou.mean().item()
+            total_loss += loss.item()
 
-        # Score loss calculation (intersection over union) IoU
-        inter = (gt_mask * (prd_mask > 0.5)).sum(1).sum(1)
-        iou = inter / (gt_mask.sum(1).sum(1) + (prd_mask > 0.5).sum(1).sum(1) - inter)
-        score_loss = torch.abs(prd_scores[:, 0] - iou).mean()
-        loss = seg_loss + score_loss * 0.05  # mix losses
+    mean_iou = total_iou / train_size
+    mean_loss = total_loss / train_size
 
-        # Backpropagation
-        predictor.model.zero_grad()  # empty gradient
-        scaler.scale(loss).backward()  # Backpropagate
-        scaler.step(optimizer)
-        scaler.update()  # Mix precision
+    val_iou = evaluate(predictor, val_data, val_files, max_masks)
+    print(f"Epoch {epoch+1}: Train IoU = {mean_iou:.4f}, Train Loss = {mean_loss:.4f}, Val IoU = {val_iou:.4f}")
 
-        if (itr % 500 == 0):
-            torch.save(predictor.model.state_dict(), f"model{itr}.torch")
-            print("Saved model.")
+    if val_iou > best_val_iou:
+        best_val_iou = val_iou
+        torch.save(predictor.model.state_dict(), "best_model.torch")
+        print(f"New best model saved, Val IoU = {best_val_iou:.4f}")
+        no_improvement_count = 0  # Reset counter when improvement is seen
+    else:
+        no_improvement_count += 1
+        print(f"No improvement in validation IoU for {no_improvement_count} epochs.")
 
-        mean_iou = mean_iou * 0.99 + 0.01 * np.mean(iou.cpu().detach().numpy())
-        if (itr % 100 == 0):
-            print(f"step {itr} Accuracy (IoU) = {mean_iou}")
-
-        # visualize_training_results(image, masks, prd_masks, mean_iou, itr)
+    # Early stopping check
+    if no_improvement_count >= patience:
+        print(f"Early stopping triggered. No improvement in validation IoU for {patience} consecutive epochs.")
+        break

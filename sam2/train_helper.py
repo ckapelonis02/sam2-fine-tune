@@ -4,6 +4,7 @@ import torch
 import cv2
 import os
 import gc
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
@@ -118,3 +119,63 @@ def visualize_training_results(image, masks, predicted_mask, iou, itr):
     plt.title("IoU Over Time")
     plt.legend()
     plt.show()
+
+def process_batch(predictor, image, masks, input_point, input_label, device="cuda"):
+    if masks.shape[0] == 0:
+        return None, None, None
+
+    predictor.set_image(image)
+    
+    mask_input, unnorm_coords, labels, _ = predictor._prep_prompts(input_point, input_label, box=None, mask_logits=None, normalize_coords=True)
+    sparse_embeddings, dense_embeddings = predictor.model.sam_prompt_encoder(points=(unnorm_coords, labels), boxes=None, masks=None)
+
+    batched_mode = unnorm_coords.shape[0] > 1
+    high_res_features = [feat_level[-1].unsqueeze(0) for feat_level in predictor._features["high_res_feats"]]
+
+    low_res_masks, prd_scores, _, _ = predictor.model.sam_mask_decoder(
+        image_embeddings=predictor._features["image_embed"][-1].unsqueeze(0),
+        image_pe=predictor.model.sam_prompt_encoder.get_dense_pe(),
+        sparse_prompt_embeddings=sparse_embeddings,
+        dense_prompt_embeddings=dense_embeddings,
+        multimask_output=True,
+        repeat_image=batched_mode,
+        high_res_features=high_res_features
+    )
+
+    prd_masks = predictor._transforms.postprocess_masks(low_res_masks, predictor._orig_hw[-1])
+    gt_mask = torch.tensor((masks / 255).astype(np.float16), device=device)
+    prd_mask = torch.sigmoid(prd_masks[:, 0].to(dtype=torch.float16))
+
+    return prd_mask, prd_scores, gt_mask
+
+
+def compute_iou_loss(prd_mask, prd_scores, gt_mask):
+    """Computes IoU, segmentation loss, and score loss."""
+    inter = (gt_mask * (prd_mask > 0.5)).sum(dim=[1, 2])
+    union = gt_mask.sum(dim=[1, 2]) + (prd_mask > 0.5).sum(dim=[1, 2]) - inter
+    iou = inter / (union + 1e-6)
+    
+    seg_loss = (-gt_mask * torch.log(prd_mask + 1e-6) - (1 - gt_mask) * torch.log((1 - prd_mask) + 1e-6)).mean()
+    score_loss = torch.abs(prd_scores[:, 0] - iou).mean()
+    
+    return iou, seg_loss + score_loss * 0.05
+
+
+def evaluate(predictor, val_data, val_files, max_masks):
+    predictor.model.eval()
+    total_iou, count = 0, 0
+
+    with torch.no_grad():
+        for i in tqdm(range(len(val_files)), desc="Validation Progress"):
+            image, masks, input_point, input_label = read_batch(val_data, i, max_masks)
+            prd_mask, prd_scores, gt_mask = process_batch(predictor, image, masks, input_point, input_label)
+            
+            if prd_mask is None:
+                continue
+            
+            iou, _ = compute_iou_loss(prd_mask, prd_scores, gt_mask)
+            total_iou += iou.mean().item()
+            count += 1
+
+    predictor.model.train()
+    return total_iou / count if count > 0 else 0
